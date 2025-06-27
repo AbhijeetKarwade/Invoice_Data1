@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Extractor</title>
+    <script src="https://unpkg.com/papaparse@latest/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .collapsible-content { display: none; }
+        .collapsible-content.active { display: block; }
+        .table-container {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 0.375rem;
+        }
+        .table-container table { margin-top: 0; }
+        .table-container thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: #f2f2f2;
+        }
+        .show-more-btn {
+            display: block;
+            width: 100%;
+            text-align: center;
+            padding: 0.5rem;
+            background-color: #3b82f6;
+            color: white;
+            border-radius: 0.375rem;
+            margin-top: 0.5rem;
+        }
+        .show-more-btn:hover { background-color: #2563eb; }
+        .date-range-container {
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .date-range-container.active { display: grid; }
+        
+        /* Sorting styles */
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px !important;
+        }
+        .sortable-header::after {
+            content: "";
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            opacity: 0.3;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #333;
+            opacity: 1;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #333;
+            opacity: 1;
+        }
+        .sortable-header:hover::after {
+            opacity: 0.7;
+        }
+        
+        /* Combo box styles */
+        .combo-box {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+        .combo-box input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 0.25rem;
+        }
+        .combo-box-options {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            z-index: 1000;
+            display: none;
+        }
+        .combo-box-options.active {
+            display: block;
+        }
+        .combo-box-option {
+            padding: 0.5rem;
+            cursor: pointer;
+        }
+        .combo-box-option:hover {
+            background-color: #f0f0f0;
+        }
+        .combo-box-option.selected {
+            background-color: #e0e0e0;
+        }
+
+        /* Section header styles */
+        .section-header {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            text-align: center;
+        }
+
+        /* Control panel styles */
+        .control-panel-section {
+            background-color: white;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Date range active indicator */
+        .date-range-active {
+            background-color: #f0f9ff;
+            border: 1px solid #3b82f6;
+            border-radius: 0.25rem;
+            padding: 0.25rem;
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            display: none;
+        }
+    </style>
+</head>
+<body class="p-4 bg-gray-100">
+    <h1 class="text-2xl font-bold mb-4">Invoice Extractor</h1>
+    
+    <!-- Top Control Panel -->
+    <div class="bg-white p-4 rounded shadow mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- File Input -->
+            <div>
+                <div class="section-header">Load File</div>
+                <div class="control-panel-section">
+                    <input type="file" id="fileInput" accept=".xlsx" class="text-sm w-full mb-2">
+                    <button id="loadFile" class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 w-full text-sm flex items-center justify-center gap-2">
+                        <span id="loadButtonText">Upload</span>
+                        <span id="loadSpinner" class="spinner hidden"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search -->
+            <div>
+                <div class="section-header">Search</div>
+                <div class="control-panel-section">
+                    <select id="nameColumn" class="border p-1 rounded w-full text-sm mb-2"></select>
+                    <div id="textSearchContainer">
+                        <div class="combo-box">
+                            <input type="text" id="nameSearchInput" placeholder="Type to search or select..." class="border p-1 rounded w-full text-sm">
+                            <div id="nameSearchDropdown" class="combo-box-options"></div>
+                        </div>
+                    </div>
+                    <div id="dateRangeContainer" class="date-range-container">
+                        <div>
+                            <label class="text-xs">From:</label>
+                            <input type="date" id="dateFrom" class="border p-1 rounded w-full text-sm">
+                        </div>
+                        <div>
+                            <label class="text-xs">To:</label>
+                            <input type="date" id="dateTo" class="border p-1 rounded w-full text-sm">
+                        </div>
+                    </div>
+                    <div id="dateRangeActive" class="date-range-active hidden"></div>
+                    <button id="searchByName" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 mt-2 w-full text-sm">
+                        Apply
+                    </button>
+                </div>
+            </div>
+
+            <!-- Column Selection -->
+            <div>
+                <div class="section-header">Select columns</div>
+                <div class="control-panel-section">
+                    <select id="columnSelect" multiple class="border p-2 rounded w-full text-sm h-16 mb-2"></select>
+                    <button id="applyFilters" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 w-full text-sm">
+                        Apply & Save
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Buttons -->
+        <div class="flex flex-wrap gap-2 mt-4">
+            <button id="downloadPDF" class="bg-green-500 text-white px-3 py-1 rounded hover:bg-purple-600 text-sm">
+                PDF
+            </button>
+            <button id="viewPrint" class="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 text-sm">
+                View & Print
+            </button>
+        </div>
+    </div>
+
+    <!-- Filtered Rows Table -->
+    <h2 class="text-xl font-semibold mt-6">Filtered Rows</h2>
+    <div class="table-container">
+        <table id="matchingRowsTable" class="bg-white"></table>
+    </div>
+    <button id="showAllRows" class="show-more-btn hidden">Show All Rows</button>
+
+    <script>
+        let data = [];
+        let headers = [];
+        let filteredData = [];
+        let showingAllRows = false;
+        let originalData = [];
+        let selectedColumns = [];
+        let currentSortColumn = null;
+        let sortDirection = 'asc';
+        let workbook = null;
+
+        // Load Excel File
+        document.getElementById('loadFile').addEventListener('click', () => {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) {
+                alert('Please select a file.');
+                return;
+            }
+
+            // Show loading state
+            const loadButtonText = document.getElementById('loadButtonText');
+            const loadSpinner = document.getElementById('loadSpinner');
+            const loadButton = document.getElementById('loadFile');
+            
+            loadButton.disabled = true;
+            loadButtonText.textContent = 'Processing...';
+            loadSpinner.classList.remove('hidden');
+
+            // Create FormData object to send the file
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Send the file to the server for processing
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Load the processed file
+                const processedFileUrl = `/processed/${data.processed_file}`;
+                
+                return fetch(processedFileUrl)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Failed to load processed file');
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const reader = new FileReader();
+                        return new Promise((resolve, reject) => {
+                            reader.onload = function(e) {
+                                const binaryStr = e.target.result;
+                                workbook = XLSX.read(binaryStr, { type: 'binary' });
+                                resolve();
+                            };
+                            reader.onerror = reject;
+                            reader.readAsBinaryString(blob);
+                        });
+                    });
+            })
+            .then(() => {
+                // The processed file will have one sheet named "Sheet1"
+                loadSheetData("Sheet1");
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred: ' + error.message);
+            })
+            .finally(() => {
+                // Reset button state
+                loadButton.disabled = false;
+                loadButtonText.textContent = 'Upload';
+                loadSpinner.classList.add('hidden');
+            });
+        });
+
+        // Load data from specific sheet
+        function loadSheetData(sheetName) {
+            const sheet = workbook.Sheets[sheetName];
+
+            // Extract headers
+            const range = XLSX.utils.decode_range(sheet['!ref']);
+            headers = [];
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellAddress = XLSX.utils.encode_cell({ r: 2, c: C });
+                const cell = sheet[cellAddress];
+                headers.push(cell ? cell.v : `Column ${C + 1}`);
+            }
+
+            // Extract data
+            data = [];
+            for (let R = 3; R <= range.e.r; ++R) {
+                const row = {};
+                let hasData = false;
+                for (let C = 0; C < headers.length; ++C) {
+                    const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                    const cell = sheet[cellAddress];
+                    row[headers[C]] = cell ? cell.v : '';
+                    if (cell && cell.v) hasData = true;
+                }
+                if (hasData) data.push(row);
+            }
+
+            originalData = [...data];
+            filteredData = [...data];
+            selectedColumns = [...headers];
+            showingAllRows = false;
+            currentSortColumn = null;
+            sortDirection = 'asc';
+            updateMatchingRowsTable();
+            populateDropdowns();
+        }
+
+        // Populate Dropdowns
+        function populateDropdowns() {
+            const nameColumn = document.getElementById('nameColumn');
+            const columnSelect = document.getElementById('columnSelect');
+            nameColumn.innerHTML = '';
+            columnSelect.innerHTML = '';
+
+            headers.forEach(header => {
+                const option1 = document.createElement('option');
+                option1.value = header;
+                option1.textContent = header;
+                nameColumn.appendChild(option1);
+
+                const option2 = document.createElement('option');
+                option2.value = header;
+                option2.textContent = header;
+                columnSelect.appendChild(option2);
+                option2.selected = selectedColumns.includes(header);
+            });
+
+            nameColumn.addEventListener('change', function() {
+                const selectedColumn = this.value;
+                const isDateColumn = selectedColumn.toLowerCase().includes('date');
+                
+                const textSearchContainer = document.getElementById('textSearchContainer');
+                const dateRangeContainer = document.getElementById('dateRangeContainer');
+                const dateRangeActive = document.getElementById('dateRangeActive');
+                
+                if (isDateColumn) {
+                    textSearchContainer.style.display = 'none';
+                    dateRangeContainer.classList.add('active');
+                    dateRangeActive.classList.add('hidden');
+                    
+                    // Clear date inputs when switching to date column
+                    document.getElementById('dateFrom').value = '';
+                    document.getElementById('dateTo').value = '';
+                } else {
+                    textSearchContainer.style.display = 'block';
+                    dateRangeContainer.classList.remove('active');
+                    dateRangeActive.classList.add('hidden');
+                    
+                    // Get unique values for the selected column
+                    const uniqueValues = [...new Set(originalData.map(row => row[selectedColumn]))].filter(Boolean);
+                    
+                    // Clear previous dropdown
+                    const dropdown = document.getElementById('nameSearchDropdown');
+                    dropdown.innerHTML = '';
+                    
+                    // Create new options
+                    uniqueValues.forEach(value => {
+                        const option = document.createElement('div');
+                        option.className = 'combo-box-option';
+                        option.textContent = value;
+                        option.dataset.value = value;
+                        option.addEventListener('click', () => {
+                            document.getElementById('nameSearchInput').value = value;
+                            dropdown.classList.remove('active');
+                        });
+                        dropdown.appendChild(option);
+                    });
+                    
+                    // Setup input event for filtering
+                    const input = document.getElementById('nameSearchInput');
+                    input.value = '';
+                    input.addEventListener('input', function() {
+                        const searchTerm = this.value.toLowerCase();
+                        const options = dropdown.querySelectorAll('.combo-box-option');
+                        
+                        options.forEach(option => {
+                            const text = option.textContent.toLowerCase();
+                            if (text.includes(searchTerm)) {
+                                option.style.display = 'block';
+                            } else {
+                                option.style.display = 'none';
+                            }
+                        });
+                        
+                        dropdown.classList.add('active');
+                    });
+                    
+                    // Show dropdown when input is focused
+                    input.addEventListener('focus', () => {
+                        dropdown.classList.add('active');
+                    });
+                    
+                    // Hide dropdown when clicking outside
+                    document.addEventListener('click', (e) => {
+                        if (!textSearchContainer.contains(e.target)) {
+                            dropdown.classList.remove('active');
+                        }
+                    });
+                }
+            });
+        }
+
+        // Sort data function
+        function sortData(column) {
+            if (currentSortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            filteredData.sort((a, b) => {
+                const valA = a[column];
+                const valB = b[column];
+                
+                // Handle numbers
+                if (!isNaN(valA) && !isNaN(valB)) {
+                    return sortDirection === 'asc' ? valA - valB : valB - valA;
+                }
+                
+                // Handle dates
+                const dateA = new Date(valA);
+                const dateB = new Date(valB);
+                if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
+                    return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
+                }
+                
+                // Default to string comparison
+                const strA = String(valA || '').toLowerCase();
+                const strB = String(valB || '').toLowerCase();
+                return sortDirection === 'asc' 
+                    ? strA.localeCompare(strB) 
+                    : strB.localeCompare(strA);
+            });
+
+            updateMatchingRowsTable();
+        }
+
+        // Update Matching Rows Table with sorting
+        function updateMatchingRowsTable() {
+            const table = document.getElementById('matchingRowsTable');
+            const showAllBtn = document.getElementById('showAllRows');
+            table.innerHTML = '';
+            
+            if (filteredData.length === 0) {
+                showAllBtn.classList.add('hidden');
+                return;
+            }
+
+            const thead = document.createElement('thead');
+            const tr = document.createElement('tr');
+            
+            const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
+            
+            displayColumns.forEach(header => {
+                const th = document.createElement('th');
+                th.textContent = header;
+                th.className = 'sortable-header';
+                
+                if (header === currentSortColumn) {
+                    th.classList.add(sortDirection);
+                }
+                
+                th.addEventListener('click', () => {
+                    sortData(header);
+                });
+                
+                tr.appendChild(th);
+            });
+            thead.appendChild(tr);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            const rowsToShow = showingAllRows ? filteredData : filteredData.slice(0, 5);
+            
+            rowsToShow.forEach(row => {
+                const tr = document.createElement('tr');
+                displayColumns.forEach(header => {
+                    const td = document.createElement('td');
+                    td.textContent = row[header] || '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            if (filteredData.length > 5 && !showingAllRows) {
+                showAllBtn.classList.remove('hidden');
+                showAllBtn.textContent = `Show All (${filteredData.length} rows)`;
+            } else {
+                showAllBtn.classList.add('hidden');
+            }
+        }
+
+        // Search by Name or Date with proper DD/MM/YYYY handling
+                    // Search by Name or Date with proper DD/MM/YYYY handling
+            document.getElementById('searchByName').addEventListener('click', () => {
+                const column = document.getElementById('nameColumn').value;
+                const isDateColumn = column.toLowerCase().includes('date');
+                
+                if (isDateColumn) {
+                    const dateFrom = document.getElementById('dateFrom').value;
+                    const dateTo = document.getElementById('dateTo').value;
+                    
+                    if (!dateFrom && !dateTo) {
+                        alert('Please select at least one date for the range');
+                        return;
+                    }
+                    
+                    // Show active date range
+                    const dateRangeActive = document.getElementById('dateRangeActive');
+                    dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
+                    dateRangeActive.classList.remove('hidden');
+                    
+                    filteredData = originalData.filter(row => {
+                        const cellValue = row[column];
+                        if (!cellValue) return false;
+                        
+                        // Parse the cell value as a date in DD/MM/YYYY format
+                        let cellDate;
+                        if (cellValue instanceof Date) {
+                            cellDate = new Date(cellValue);
+                        } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
+                            // Handle string dates in DD/MM/YYYY format
+                            if (typeof cellValue === 'string' && cellValue.includes('/')) {
+                                const parts = cellValue.split('/');
+                                if (parts.length === 3) {
+                                    // Force DD/MM/YYYY interpretation
+                                    const day = parseInt(parts[0], 10);
+                                    const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
+                                    const year = parseInt(parts[2], 10);
+                                    cellDate = new Date(year, month, day);
+                                } else {
+                                    cellDate = new Date(cellValue);
+                                }
+                            } else {
+                                cellDate = new Date(cellValue);
+                            }
+                        } else {
+                            return false;
+                        }
+                        
+                        if (isNaN(cellDate.getTime())) return false;
+                        
+                        // Convert the filter dates from YYYY-MM-DD to Date objects
+                        const fromDate = dateFrom ? new Date(dateFrom) : null;
+                        const toDate = dateTo ? new Date(dateTo) : null;
+                        
+                        // Reset time components for accurate date comparison
+                        if (fromDate) fromDate.setHours(0, 0, 0, 0);
+                        if (toDate) toDate.setHours(23, 59, 59, 999);
+                        cellDate.setHours(0, 0, 0, 0);
+                        
+                        // Compare dates
+                        if (fromDate && toDate) {
+                            return cellDate >= fromDate && cellDate <= toDate;
+                        } else if (fromDate) {
+                            return cellDate >= fromDate;
+                        } else if (toDate) {
+                            return cellDate <= toDate;
+                        }
+                        return false;
+                    });
+                } else {
+                    const searchTerm = document.getElementById('nameSearchInput').value;
+                    filteredData = originalData.filter(row => 
+                        row[column] && row[column].toString() === searchTerm
+                    );
+                    // Hide date range indicator when not using date filter
+                    document.getElementById('dateRangeActive').classList.add('hidden');
+                }
+                
+                currentSortColumn = null;
+                sortDirection = 'asc';
+                showingAllRows = false;
+                updateMatchingRowsTable();
+            });
+
+        // Toggle showing all rows
+        document.getElementById('showAllRows').addEventListener('click', () => {
+            showingAllRows = true;
+            updateMatchingRowsTable();
+        });
+
+        // Apply Column Filters
+        document.getElementById('applyFilters').addEventListener('click', () => {
+            selectedColumns = Array.from(document.getElementById('columnSelect').selectedOptions).map(opt => opt.value);
+            
+            if (selectedColumns.length === 0) {
+                selectedColumns = [...headers];
+            }
+            
+            showingAllRows = false;
+            updateMatchingRowsTable();
+        });
+
+        // Download PDF
+        document.getElementById('downloadPDF').addEventListener('click', () => {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
+            const sheetName = "Processed Data"; // Since we're working with processed data
+            
+            if (sheetName) {
+                doc.text(`Sheet: ${sheetName}`, 14, 10);
+            }
+
+            const groupedByParty = filteredData.reduce((acc, row) => {
+                const party = row['Party Name'] || 'Other';
+                if (!acc[party]) acc[party] = [];
+                acc[party].push(row);
+                return acc;
+            }, {});
+
+            Object.entries(groupedByParty).forEach(([party, rows], index) => {
+                if (index > 0) doc.addPage();
+                doc.text(`Invoice Report for ${party}`, 14, 20);
+                doc.autoTable({
+                    startY: 30,
+                    head: [displayColumns],
+                    body: rows.map(row => displayColumns.map(header => row[header] || '')),
+                    theme: 'striped',
+                    headStyles: { fillColor: [200, 200, 200] },
+                });
+            });
+
+            doc.save('invoice_report.pdf');
+        });
+
+        // View & Print
+        document.getElementById('viewPrint').addEventListener('click', () => {
+            if (filteredData.length === 0) {
+                alert('No filtered data available. Please apply filters first.');
+                return;
+            }
+            const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
+            const sheetName = "Processed Data"; // Since we're working with processed data
+            
+            sessionStorage.setItem('filteredData', JSON.stringify(filteredData));
+            sessionStorage.setItem('columnsToShow', JSON.stringify(displayColumns));
+            sessionStorage.setItem('sheetName', sheetName);
+            
+            setTimeout(() => {
+                const printWindow = window.open('/print', '_blank');
+                if (!printWindow) {
+                    alert('Popup blocked. Please allow popups for this site.');
+                }
+            }, 100);
+        });
+    </script>
+</body>
+</html>

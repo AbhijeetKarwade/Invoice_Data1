@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filtered Invoice Data</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        button { padding: 10px; margin: 5px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #2563eb; }
+        @media print {
+            button { display: none; }
+            h1 { font-size: 16pt; }
+            h2 { font-size: 14pt; }
+            body { margin: 0; padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>Filtered Invoice Data</h1>
+    <h2 id="sheetTitle"></h2>
+    <table id="dataTable"></table>
+    <button onclick="window.print()">Print</button>
+    <button onclick="window.location.href='/'">Back to Home</button>
+    <script>
+        window.addEventListener('load', () => {
+            const filteredData = JSON.parse(sessionStorage.getItem('filteredData') || '[]');
+            const columnsToShow = JSON.parse(sessionStorage.getItem('columnsToShow') || '[]');
+            const sheetName = sessionStorage.getItem('sheetName') || '';
+            const table = document.getElementById('dataTable');
+
+            // Display sheet name
+            document.getElementById('sheetTitle').textContent = sheetName ? `Sheet: ${sheetName}` : '';
+
+            // Clear existing content
+            table.innerHTML = '';
+
+            if (filteredData.length === 0 || columnsToShow.length === 0) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = columnsToShow.length || 1;
+                td.textContent = 'No filtered data available. Please apply filters in the main page.';
+                tr.appendChild(td);
+                table.appendChild(tr);
+                return;
+            }
+
+            // Create header
+            const thead = document.createElement('thead');
+            const tr = document.createElement('tr');
+            columnsToShow.forEach(column => {
+                const th = document.createElement('th');
+                th.textContent = column;
+                tr.appendChild(th);
+            });
+            thead.appendChild(tr);
+            table.appendChild(thead);
+
+            // Create body
+            const tbody = document.createElement('tbody');
+            filteredData.forEach(row => {
+                const tr = document.createElement('tr');
+                columnsToShow.forEach(column => {
+                    const td = document.createElement('td');
+                    td.textContent = row[column] || '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            // Clear sessionStorage after use
+            sessionStorage.removeItem('filteredData');
+            sessionStorage.removeItem('columnsToShow');
+            sessionStorage.removeItem('sheetName');
+        });
+    </script>
+</body>
+</html>
