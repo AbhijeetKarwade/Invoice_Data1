@@ -2,6 +2,8 @@ from flask import Flask, render_template, send_from_directory, request, jsonify
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
+import json
+import math
 
 app = Flask(__name__, static_folder='static', template_folder='static')
 
@@ -16,6 +18,16 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def convert_nans(obj):
+    """Convert NaN values to None (which becomes null in JSON)"""
+    if isinstance(obj, float) and math.isnan(obj):
+        return None
+    elif isinstance(obj, dict):
+        return {k: convert_nans(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_nans(item) for item in obj]
+    return obj
 
 def process_excel_file(filepath):
     """Process the Excel file and return the processed data in memory"""
@@ -58,7 +70,7 @@ def process_excel_file(filepath):
         parent_table = parent_table.merge(custom_remaining, on=['Ref_No', 'date'], how='outer')
         parent_table = parent_table.merge(items_remaining, on=['Ref_No', 'date'], how='outer')
 
-        # Handle missing values
+        # Handle missing values - fill with empty string for strings, 0 for numbers
         string_columns = [col for col in parent_table.columns if parent_table[col].dtype == 'object']
         numeric_columns = [col for col in parent_table.columns if parent_table[col].dtype in ['float64', 'int64']]
         parent_table[string_columns] = parent_table[string_columns].fillna('')
@@ -73,10 +85,11 @@ def process_excel_file(filepath):
         # Remove duplicates based on all columns
         parent_table = parent_table.drop_duplicates(keep='first')
 
-        # Convert the processed DataFrame to a dictionary for JSON response
+        # Convert the processed DataFrame to a dictionary and clean NaN values
         processed_data = parent_table.to_dict(orient='records')
+        processed_data = convert_nans(processed_data)
         
-        return processed_data, None
+        return processed_data, list(parent_table.columns)
     except Exception as e:
         return None, str(e)
 
@@ -103,18 +116,18 @@ def upload_file():
         file.save(filepath)
         
         # Process the Excel file and get data in memory
-        processed_data, error = process_excel_file(filepath)
+        processed_data, error_or_headers = process_excel_file(filepath)
         
         # Remove the uploaded file after processing to save space
         os.remove(filepath)
         
-        if error:
-            return jsonify({'error': error}), 500
+        if isinstance(error_or_headers, str):  # It's an error message
+            return jsonify({'error': error_or_headers}), 500
         
         return jsonify({
             'message': 'File successfully processed',
             'data': processed_data,
-            'headers': list(processed_data[0].keys()) if processed_data else []
+            'headers': error_or_headers  # In this case, it's the headers list
         })
     
     return jsonify({'error': 'Invalid file type'}), 400

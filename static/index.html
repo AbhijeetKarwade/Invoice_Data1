@@ -250,68 +250,82 @@
         let sortDirection = 'asc';
 
         // Load Excel File
-        document.getElementById('loadFile').addEventListener('click', () => {
-            const file = document.getElementById('fileInput').files[0];
-            if (!file) {
-                alert('Please select a file.');
-                return;
-            }
-
-            // Show loading state
-            const loadButtonText = document.getElementById('loadButtonText');
-            const loadSpinner = document.getElementById('loadSpinner');
-            const loadButton = document.getElementById('loadFile');
-            
-            loadButton.disabled = true;
-            loadButtonText.textContent = 'Processing...';
-            loadSpinner.classList.remove('hidden');
-
-            // Create FormData object to send the file
-            const formData = new FormData();
-            formData.append('file', file);
-
-            // Send the file to the server for processing
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.json();
-            })
-            .then(responseData => {
-                if (responseData.error) {
-                    throw new Error(responseData.error);
+        
+            document.getElementById('loadFile').addEventListener('click', () => {
+                const file = document.getElementById('fileInput').files[0];
+                if (!file) {
+                    alert('Please select a file.');
+                    return;
                 }
 
-                // Process the returned data directly
-                data = responseData.data;
-                headers = responseData.headers || (data.length > 0 ? Object.keys(data[0]) : []);
+                // Show loading state
+                const loadButtonText = document.getElementById('loadButtonText');
+                const loadSpinner = document.getElementById('loadSpinner');
+                const loadButton = document.getElementById('loadFile');
                 
-                // Store the data
-                originalData = [...data];
-                filteredData = [...data];
-                selectedColumns = [...headers];
-                showingAllRows = false;
-                currentSortColumn = null;
-                sortDirection = 'asc';
-                
-                updateMatchingRowsTable();
-                populateDropdowns();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred: ' + error.message);
-            })
-            .finally(() => {
-                // Reset button state
-                loadButton.disabled = false;
-                loadButtonText.textContent = 'Upload';
-                loadSpinner.classList.add('hidden');
+                loadButton.disabled = true;
+                loadButtonText.textContent = 'Processing...';
+                loadSpinner.classList.remove('hidden');
+
+                // Create FormData object to send the file
+                const formData = new FormData();
+                formData.append('file', file);
+
+                // Send the file to the server for processing
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => {
+                            throw new Error(err.error || 'Network response was not ok');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(responseData => {
+                    if (responseData.error) {
+                        throw new Error(responseData.error);
+                    }
+
+                    // Process the returned data directly
+                    data = responseData.data || [];
+                    headers = responseData.headers || (data.length > 0 ? Object.keys(data[0]) : []);
+                    
+                    if (data.length === 0) {
+                        throw new Error('No data found in the processed file');
+                    }
+                    
+                    // Store the data
+                    originalData = [...data];
+                    filteredData = [...data];
+                    selectedColumns = [...headers];
+                    showingAllRows = false;
+                    currentSortColumn = null;
+                    sortDirection = 'asc';
+                    
+                    updateMatchingRowsTable();
+                    populateDropdowns();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred: ' + error.message);
+                    
+                    // Clear any existing data
+                    data = [];
+                    headers = [];
+                    originalData = [];
+                    filteredData = [];
+                    updateMatchingRowsTable();
+                })
+                .finally(() => {
+                    // Reset button state
+                    loadButton.disabled = false;
+                    loadButtonText.textContent = 'Upload';
+                    loadSpinner.classList.add('hidden');
+                });
             });
-        });
 
         // Populate Dropdowns
         function populateDropdowns() {
