@@ -2,6 +2,9 @@ from flask import Flask, render_template, send_from_directory, request, jsonify
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
+import time
+from threading import Thread
+import logging
 
 app = Flask(__name__, static_folder='static', template_folder='static')
 
@@ -12,13 +15,33 @@ ALLOWED_EXTENSIONS = {'xlsx'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB limit
 
 # Ensure upload and processed directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def cleanup_old_files():
+    """Delete processed files older than 24 hours"""
+    while True:
+        try:
+            now = time.time()
+            for filename in os.listdir(app.config['PROCESSED_FOLDER']):
+                filepath = os.path.join(app.config['PROCESSED_FOLDER'], filename)
+                if os.path.isfile(filepath):
+                    # Delete files older than 24 hours
+                    if now - os.path.getmtime(filepath) > 86400:
+                        os.remove(filepath)
+                        app.logger.info(f"Deleted old file: {filename}")
+        except Exception as e:
+            app.logger.error(f"Error in cleanup: {str(e)}")
+        time.sleep(3600)  # Run every hour
 
 def process_excel_file(filepath):
     """Process the Excel file using the logic from app2.py"""
@@ -109,16 +132,35 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Process the Excel file
-        processed_path, error = process_excel_file(filepath)
+        try:
+            # Process the Excel file
+            processed_path, error = process_excel_file(filepath)
+            
+            # Delete the original uploaded file after processing
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    app.logger.info(f"Deleted uploaded file: {filename}")
+            except Exception as e:
+                app.logger.error(f"Error deleting uploaded file: {str(e)}")
+            
+            if error:
+                return jsonify({'error': error}), 500
+            
+            return jsonify({
+                'message': 'File successfully processed',
+                'processed_file': os.path.basename(processed_path)
+            })
         
-        if error:
-            return jsonify({'error': error}), 500
-        
-        return jsonify({
-            'message': 'File successfully processed',
-            'processed_file': os.path.basename(processed_path)
-        })
+        except Exception as e:
+            # Ensure file is deleted even if processing fails
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    app.logger.info(f"Deleted uploaded file after processing failure: {filename}")
+            except Exception as delete_error:
+                app.logger.error(f"Error deleting uploaded file after processing failure: {str(delete_error)}")
+            return jsonify({'error': str(e)}), 500
     
     return jsonify({'error': 'Invalid file type'}), 400
 
@@ -129,6 +171,14 @@ def processed_file(filename):
 @app.route('/static/<path:filename>')
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'error': 'File too large (max 50MB)'}), 413
+
+# Start the cleanup thread when the app starts
+if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    Thread(target=cleanup_old_files, daemon=True).start()
 
 if __name__ == '__main__':
     app.run(debug=True)
