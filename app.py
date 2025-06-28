@@ -2,7 +2,6 @@ from flask import Flask, render_template, send_from_directory, request, jsonify
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
-import io
 
 app = Flask(__name__, static_folder='static', template_folder='static')
 
@@ -114,7 +113,8 @@ def upload_file():
         
         return jsonify({
             'message': 'File successfully processed',
-            'data': processed_data
+            'data': processed_data,
+            'headers': list(processed_data[0].keys()) if processed_data else []
         })
     
     return jsonify({'error': 'Invalid file type'}), 400

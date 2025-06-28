@@ -248,7 +248,6 @@
         let selectedColumns = [];
         let currentSortColumn = null;
         let sortDirection = 'asc';
-        let workbook = null;
 
         // Load Excel File
         document.getElementById('loadFile').addEventListener('click', () => {
@@ -282,37 +281,25 @@
                 }
                 return response.json();
             })
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
+            .then(responseData => {
+                if (responseData.error) {
+                    throw new Error(responseData.error);
                 }
 
-                // Load the processed file
-                const processedFileUrl = `/processed/${data.processed_file}`;
+                // Process the returned data directly
+                data = responseData.data;
+                headers = responseData.headers || (data.length > 0 ? Object.keys(data[0]) : []);
                 
-                return fetch(processedFileUrl)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error('Failed to load processed file');
-                        }
-                        return response.blob();
-                    })
-                    .then(blob => {
-                        const reader = new FileReader();
-                        return new Promise((resolve, reject) => {
-                            reader.onload = function(e) {
-                                const binaryStr = e.target.result;
-                                workbook = XLSX.read(binaryStr, { type: 'binary' });
-                                resolve();
-                            };
-                            reader.onerror = reject;
-                            reader.readAsBinaryString(blob);
-                        });
-                    });
-            })
-            .then(() => {
-                // The processed file will have one sheet named "Sheet1"
-                loadSheetData("Sheet1");
+                // Store the data
+                originalData = [...data];
+                filteredData = [...data];
+                selectedColumns = [...headers];
+                showingAllRows = false;
+                currentSortColumn = null;
+                sortDirection = 'asc';
+                
+                updateMatchingRowsTable();
+                populateDropdowns();
             })
             .catch(error => {
                 console.error('Error:', error);
@@ -325,43 +312,6 @@
                 loadSpinner.classList.add('hidden');
             });
         });
-
-        // Load data from specific sheet
-        function loadSheetData(sheetName) {
-            const sheet = workbook.Sheets[sheetName];
-
-            // Extract headers
-            const range = XLSX.utils.decode_range(sheet['!ref']);
-            headers = [];
-            for (let C = range.s.c; C <= range.e.c; ++C) {
-                const cellAddress = XLSX.utils.encode_cell({ r: 2, c: C });
-                const cell = sheet[cellAddress];
-                headers.push(cell ? cell.v : `Column ${C + 1}`);
-            }
-
-            // Extract data
-            data = [];
-            for (let R = 3; R <= range.e.r; ++R) {
-                const row = {};
-                let hasData = false;
-                for (let C = 0; C < headers.length; ++C) {
-                    const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-                    const cell = sheet[cellAddress];
-                    row[headers[C]] = cell ? cell.v : '';
-                    if (cell && cell.v) hasData = true;
-                }
-                if (hasData) data.push(row);
-            }
-
-            originalData = [...data];
-            filteredData = [...data];
-            selectedColumns = [...headers];
-            showingAllRows = false;
-            currentSortColumn = null;
-            sortDirection = 'asc';
-            updateMatchingRowsTable();
-            populateDropdowns();
-        }
 
         // Populate Dropdowns
         function populateDropdowns() {
@@ -551,88 +501,87 @@
         }
 
         // Search by Name or Date with proper DD/MM/YYYY handling
-                    // Search by Name or Date with proper DD/MM/YYYY handling
-            document.getElementById('searchByName').addEventListener('click', () => {
-                const column = document.getElementById('nameColumn').value;
-                const isDateColumn = column.toLowerCase().includes('date');
+        document.getElementById('searchByName').addEventListener('click', () => {
+            const column = document.getElementById('nameColumn').value;
+            const isDateColumn = column.toLowerCase().includes('date');
+            
+            if (isDateColumn) {
+                const dateFrom = document.getElementById('dateFrom').value;
+                const dateTo = document.getElementById('dateTo').value;
                 
-                if (isDateColumn) {
-                    const dateFrom = document.getElementById('dateFrom').value;
-                    const dateTo = document.getElementById('dateTo').value;
+                if (!dateFrom && !dateTo) {
+                    alert('Please select at least one date for the range');
+                    return;
+                }
+                
+                // Show active date range
+                const dateRangeActive = document.getElementById('dateRangeActive');
+                dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
+                dateRangeActive.classList.remove('hidden');
+                
+                filteredData = originalData.filter(row => {
+                    const cellValue = row[column];
+                    if (!cellValue) return false;
                     
-                    if (!dateFrom && !dateTo) {
-                        alert('Please select at least one date for the range');
-                        return;
-                    }
-                    
-                    // Show active date range
-                    const dateRangeActive = document.getElementById('dateRangeActive');
-                    dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
-                    dateRangeActive.classList.remove('hidden');
-                    
-                    filteredData = originalData.filter(row => {
-                        const cellValue = row[column];
-                        if (!cellValue) return false;
-                        
-                        // Parse the cell value as a date in DD/MM/YYYY format
-                        let cellDate;
-                        if (cellValue instanceof Date) {
-                            cellDate = new Date(cellValue);
-                        } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
-                            // Handle string dates in DD/MM/YYYY format
-                            if (typeof cellValue === 'string' && cellValue.includes('/')) {
-                                const parts = cellValue.split('/');
-                                if (parts.length === 3) {
-                                    // Force DD/MM/YYYY interpretation
-                                    const day = parseInt(parts[0], 10);
-                                    const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
-                                    const year = parseInt(parts[2], 10);
-                                    cellDate = new Date(year, month, day);
-                                } else {
-                                    cellDate = new Date(cellValue);
-                                }
+                    // Parse the cell value as a date in DD/MM/YYYY format
+                    let cellDate;
+                    if (cellValue instanceof Date) {
+                        cellDate = new Date(cellValue);
+                    } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
+                        // Handle string dates in DD/MM/YYYY format
+                        if (typeof cellValue === 'string' && cellValue.includes('/')) {
+                            const parts = cellValue.split('/');
+                            if (parts.length === 3) {
+                                // Force DD/MM/YYYY interpretation
+                                const day = parseInt(parts[0], 10);
+                                const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
+                                const year = parseInt(parts[2], 10);
+                                cellDate = new Date(year, month, day);
                             } else {
                                 cellDate = new Date(cellValue);
                             }
                         } else {
-                            return false;
+                            cellDate = new Date(cellValue);
                         }
-                        
-                        if (isNaN(cellDate.getTime())) return false;
-                        
-                        // Convert the filter dates from YYYY-MM-DD to Date objects
-                        const fromDate = dateFrom ? new Date(dateFrom) : null;
-                        const toDate = dateTo ? new Date(dateTo) : null;
-                        
-                        // Reset time components for accurate date comparison
-                        if (fromDate) fromDate.setHours(0, 0, 0, 0);
-                        if (toDate) toDate.setHours(23, 59, 59, 999);
-                        cellDate.setHours(0, 0, 0, 0);
-                        
-                        // Compare dates
-                        if (fromDate && toDate) {
-                            return cellDate >= fromDate && cellDate <= toDate;
-                        } else if (fromDate) {
-                            return cellDate >= fromDate;
-                        } else if (toDate) {
-                            return cellDate <= toDate;
-                        }
+                    } else {
                         return false;
-                    });
-                } else {
-                    const searchTerm = document.getElementById('nameSearchInput').value;
-                    filteredData = originalData.filter(row => 
-                        row[column] && row[column].toString() === searchTerm
-                    );
-                    // Hide date range indicator when not using date filter
-                    document.getElementById('dateRangeActive').classList.add('hidden');
-                }
-                
-                currentSortColumn = null;
-                sortDirection = 'asc';
-                showingAllRows = false;
-                updateMatchingRowsTable();
-            });
+                    }
+                    
+                    if (isNaN(cellDate.getTime())) return false;
+                    
+                    // Convert the filter dates from YYYY-MM-DD to Date objects
+                    const fromDate = dateFrom ? new Date(dateFrom) : null;
+                    const toDate = dateTo ? new Date(dateTo) : null;
+                    
+                    // Reset time components for accurate date comparison
+                    if (fromDate) fromDate.setHours(0, 0, 0, 0);
+                    if (toDate) toDate.setHours(23, 59, 59, 999);
+                    cellDate.setHours(0, 0, 0, 0);
+                    
+                    // Compare dates
+                    if (fromDate && toDate) {
+                        return cellDate >= fromDate && cellDate <= toDate;
+                    } else if (fromDate) {
+                        return cellDate >= fromDate;
+                    } else if (toDate) {
+                        return cellDate <= toDate;
+                    }
+                    return false;
+                });
+            } else {
+                const searchTerm = document.getElementById('nameSearchInput').value;
+                filteredData = originalData.filter(row => 
+                    row[column] && row[column].toString() === searchTerm
+                );
+                // Hide date range indicator when not using date filter
+                document.getElementById('dateRangeActive').classList.add('hidden');
+            }
+            
+            currentSortColumn = null;
+            sortDirection = 'asc';
+            showingAllRows = false;
+            updateMatchingRowsTable();
+        });
 
         // Toggle showing all rows
         document.getElementById('showAllRows').addEventListener('click', () => {
@@ -657,7 +606,7 @@
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
-            const sheetName = "Processed Data"; // Since we're working with processed data
+            const sheetName = "Processed Data";
             
             if (sheetName) {
                 doc.text(`Sheet: ${sheetName}`, 14, 10);
@@ -692,7 +641,7 @@
                 return;
             }
             const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
-            const sheetName = "Processed Data"; // Since we're working with processed data
+            const sheetName = "Processed Data";
             
             sessionStorage.setItem('filteredData', JSON.stringify(filteredData));
             sessionStorage.setItem('columnsToShow', JSON.stringify(displayColumns));
