@@ -2,29 +2,24 @@ from flask import Flask, render_template, send_from_directory, request, jsonify
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
+import io
 
 app = Flask(__name__, static_folder='static', template_folder='static')
 
 # Configuration for file uploads
-# UPLOAD_FOLDER = 'uploads'
-# PROCESSED_FOLDER = 'processed'
-UPLOAD_FOLDER = '/opt/render/project/src/uploads'
-PROCESSED_FOLDER = '/opt/render/project/src/processed'
-
+UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'xlsx'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 
-# Ensure upload and processed directories exist
+# Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def process_excel_file(filepath):
-    """Process the Excel file using the logic from app2.py"""
+    """Process the Excel file and return the processed data in memory"""
     try:
         # Read the two sheets, specifying header row (row 3, so header=2)
         df_custom = pd.read_excel(filepath, sheet_name='Custom Report', header=2)
@@ -79,14 +74,10 @@ def process_excel_file(filepath):
         # Remove duplicates based on all columns
         parent_table = parent_table.drop_duplicates(keep='first')
 
-        # Generate a unique filename for the processed file
-        processed_filename = 'processed_' + secure_filename(os.path.basename(filepath))
-        processed_path = os.path.join(app.config['PROCESSED_FOLDER'], processed_filename)
-
-        # Save to a new Excel file with column names starting from the 3rd row
-        parent_table.to_excel(processed_path, index=False, startrow=2)
+        # Convert the processed DataFrame to a dictionary for JSON response
+        processed_data = parent_table.to_dict(orient='records')
         
-        return processed_path, None
+        return processed_data, None
     except Exception as e:
         return None, str(e)
 
@@ -112,22 +103,21 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Process the Excel file
-        processed_path, error = process_excel_file(filepath)
+        # Process the Excel file and get data in memory
+        processed_data, error = process_excel_file(filepath)
+        
+        # Remove the uploaded file after processing to save space
+        os.remove(filepath)
         
         if error:
             return jsonify({'error': error}), 500
         
         return jsonify({
             'message': 'File successfully processed',
-            'processed_file': os.path.basename(processed_path)
+            'data': processed_data
         })
     
     return jsonify({'error': 'Invalid file type'}), 400
-
-@app.route('/processed/<filename>')
-def processed_file(filename):
-    return send_from_directory(app.config['PROCESSED_FOLDER'], filename)
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
