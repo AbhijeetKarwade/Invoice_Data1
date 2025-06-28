@@ -161,30 +161,6 @@
             margin-top: 0.25rem;
             display: none;
         }
-
-        /* File size warning */
-        .file-size-warning {
-            color: #ef4444;
-            font-size: 0.75rem;
-            margin-top: 0.25rem;
-            display: none;
-        }
-
-        /* Progress bar */
-        .progress-container {
-            width: 100%;
-            background-color: #e5e7eb;
-            border-radius: 0.25rem;
-            margin-top: 0.5rem;
-            display: none;
-        }
-        .progress-bar {
-            height: 0.5rem;
-            background-color: #3b82f6;
-            border-radius: 0.25rem;
-            width: 0%;
-            transition: width 0.3s ease;
-        }
     </style>
 </head>
 <body class="p-4 bg-gray-100">
@@ -198,12 +174,6 @@
                 <div class="section-header">Load File</div>
                 <div class="control-panel-section">
                     <input type="file" id="fileInput" accept=".xlsx" class="text-sm w-full mb-2">
-                    <div id="fileSizeWarning" class="file-size-warning">
-                        Warning: Large files may take longer to process
-                    </div>
-                    <div id="progressContainer" class="progress-container">
-                        <div id="progressBar" class="progress-bar"></div>
-                    </div>
                     <button id="loadFile" class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 w-full text-sm flex items-center justify-center gap-2">
                         <span id="loadButtonText">Upload</span>
                         <span id="loadSpinner" class="spinner hidden"></span>
@@ -280,19 +250,7 @@
         let sortDirection = 'asc';
         let workbook = null;
 
-        // File input change handler
-        document.getElementById('fileInput').addEventListener('change', function() {
-            const file = this.files[0];
-            const warningElement = document.getElementById('fileSizeWarning');
-            
-            if (file && file.size > 5 * 1024 * 1024) { // 5MB threshold
-                warningElement.style.display = 'block';
-            } else {
-                warningElement.style.display = 'none';
-            }
-        });
-
-        // Load Excel File with progress tracking
+        // Load Excel File
         document.getElementById('loadFile').addEventListener('click', () => {
             const file = document.getElementById('fileInput').files[0];
             if (!file) {
@@ -300,135 +258,72 @@
                 return;
             }
 
-            // Show processing state
+            // Show loading state
+            const loadButtonText = document.getElementById('loadButtonText');
+            const loadSpinner = document.getElementById('loadSpinner');
             const loadButton = document.getElementById('loadFile');
-            const loadText = document.getElementById('loadButtonText');
-            const spinner = document.getElementById('loadSpinner');
-            const progressContainer = document.getElementById('progressContainer');
-            const progressBar = document.getElementById('progressBar');
             
             loadButton.disabled = true;
-            loadText.textContent = 'Processing...';
-            spinner.classList.remove('hidden');
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
+            loadButtonText.textContent = 'Processing...';
+            loadSpinner.classList.remove('hidden');
 
-            // Create FormData with the file
+            // Create FormData object to send the file
             const formData = new FormData();
             formData.append('file', file);
 
-            // Setup timeout (5 minutes)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => {
-                controller.abort();
-                showError('Processing took too long. Try a smaller file or try again.');
-            }, 300000);
-
-            // Setup progress tracking
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/upload', true);
-            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-            
-            xhr.upload.onprogress = function(e) {
-                if (e.lengthComputable) {
-                    const percentComplete = Math.round((e.loaded / e.total) * 50); // First 50% for upload
-                    progressBar.style.width = percentComplete + '%';
+            // Send the file to the server for processing
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
                 }
-            };
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
 
-            xhr.onload = function() {
-                clearTimeout(timeoutId);
+                // Load the processed file
+                const processedFileUrl = `/processed/${data.processed_file}`;
                 
-                if (xhr.status === 200) {
-                    const response = JSON.parse(xhr.responseText);
-                    
-                    if (response.error) {
-                        showError(response.error);
-                        return;
-                    }
-                    
-                    // Update progress for processing phase
-                    progressBar.style.width = '75%';
-                    
-                    // Fetch the processed file
-                    fetchProcessedFile(response.processed_file);
-                } else {
-                    showError('Server responded with status: ' + xhr.status);
-                }
-            };
-
-            xhr.onerror = function() {
-                clearTimeout(timeoutId);
-                showError('Network error occurred');
-            };
-
-            xhr.send(formData);
-
-            function fetchProcessedFile(filename) {
-                fetch(`/processed/${filename}`)
+                return fetch(processedFileUrl)
                     .then(response => {
                         if (!response.ok) {
                             throw new Error('Failed to load processed file');
                         }
-                        
-                        // Track download progress
-                        const reader = response.body.getReader();
-                        const contentLength = +response.headers.get('Content-Length');
-                        let receivedLength = 0;
-                        let chunks = [];
-                        
-                        return new Promise((resolve, reject) => {
-                            function pump() {
-                                reader.read().then(({done, value}) => {
-                                    if (done) {
-                                        resolve(new Blob(chunks));
-                                        return;
-                                    }
-                                    
-                                    chunks.push(value);
-                                    receivedLength += value.length;
-                                    const percentComplete = 75 + Math.round((receivedLength / contentLength) * 25);
-                                    progressBar.style.width = percentComplete + '%';
-                                    
-                                    pump();
-                                }).catch(reject);
-                            }
-                            
-                            pump();
-                        });
+                        return response.blob();
                     })
                     .then(blob => {
-                        return new Promise((resolve) => {
-                            const reader = new FileReader();
+                        const reader = new FileReader();
+                        return new Promise((resolve, reject) => {
                             reader.onload = function(e) {
                                 const binaryStr = e.target.result;
                                 workbook = XLSX.read(binaryStr, { type: 'binary' });
                                 resolve();
                             };
+                            reader.onerror = reject;
                             reader.readAsBinaryString(blob);
                         });
-                    })
-                    .then(() => {
-                        progressBar.style.width = '100%';
-                        setTimeout(() => {
-                            progressContainer.style.display = 'none';
-                        }, 500);
-                        loadSheetData("Sheet1");
-                    })
-                    .catch(error => {
-                        showError(error.message);
                     });
-            }
-
-            function showError(message) {
-                console.error('Error:', message);
-                alert('An error occurred: ' + message);
-                
+            })
+            .then(() => {
+                // The processed file will have one sheet named "Sheet1"
+                loadSheetData("Sheet1");
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred: ' + error.message);
+            })
+            .finally(() => {
+                // Reset button state
                 loadButton.disabled = false;
-                loadText.textContent = 'Upload';
-                spinner.classList.add('hidden');
-                progressContainer.style.display = 'none';
-            }
+                loadButtonText.textContent = 'Upload';
+                loadSpinner.classList.add('hidden');
+            });
         });
 
         // Load data from specific sheet
@@ -466,14 +361,6 @@
             sortDirection = 'asc';
             updateMatchingRowsTable();
             populateDropdowns();
-            
-            // Reset button state
-            const loadButton = document.getElementById('loadFile');
-            const loadText = document.getElementById('loadButtonText');
-            const spinner = document.getElementById('loadSpinner');
-            loadButton.disabled = false;
-            loadText.textContent = 'Upload';
-            spinner.classList.add('hidden');
         }
 
         // Populate Dropdowns
@@ -664,87 +551,88 @@
         }
 
         // Search by Name or Date with proper DD/MM/YYYY handling
-        document.getElementById('searchByName').addEventListener('click', () => {
-            const column = document.getElementById('nameColumn').value;
-            const isDateColumn = column.toLowerCase().includes('date');
-            
-            if (isDateColumn) {
-                const dateFrom = document.getElementById('dateFrom').value;
-                const dateTo = document.getElementById('dateTo').value;
+                    // Search by Name or Date with proper DD/MM/YYYY handling
+            document.getElementById('searchByName').addEventListener('click', () => {
+                const column = document.getElementById('nameColumn').value;
+                const isDateColumn = column.toLowerCase().includes('date');
                 
-                if (!dateFrom && !dateTo) {
-                    alert('Please select at least one date for the range');
-                    return;
-                }
-                
-                // Show active date range
-                const dateRangeActive = document.getElementById('dateRangeActive');
-                dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
-                dateRangeActive.classList.remove('hidden');
-                
-                filteredData = originalData.filter(row => {
-                    const cellValue = row[column];
-                    if (!cellValue) return false;
+                if (isDateColumn) {
+                    const dateFrom = document.getElementById('dateFrom').value;
+                    const dateTo = document.getElementById('dateTo').value;
                     
-                    // Parse the cell value as a date in DD/MM/YYYY format
-                    let cellDate;
-                    if (cellValue instanceof Date) {
-                        cellDate = new Date(cellValue);
-                    } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
-                        // Handle string dates in DD/MM/YYYY format
-                        if (typeof cellValue === 'string' && cellValue.includes('/')) {
-                            const parts = cellValue.split('/');
-                            if (parts.length === 3) {
-                                // Force DD/MM/YYYY interpretation
-                                const day = parseInt(parts[0], 10);
-                                const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
-                                const year = parseInt(parts[2], 10);
-                                cellDate = new Date(year, month, day);
+                    if (!dateFrom && !dateTo) {
+                        alert('Please select at least one date for the range');
+                        return;
+                    }
+                    
+                    // Show active date range
+                    const dateRangeActive = document.getElementById('dateRangeActive');
+                    dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
+                    dateRangeActive.classList.remove('hidden');
+                    
+                    filteredData = originalData.filter(row => {
+                        const cellValue = row[column];
+                        if (!cellValue) return false;
+                        
+                        // Parse the cell value as a date in DD/MM/YYYY format
+                        let cellDate;
+                        if (cellValue instanceof Date) {
+                            cellDate = new Date(cellValue);
+                        } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
+                            // Handle string dates in DD/MM/YYYY format
+                            if (typeof cellValue === 'string' && cellValue.includes('/')) {
+                                const parts = cellValue.split('/');
+                                if (parts.length === 3) {
+                                    // Force DD/MM/YYYY interpretation
+                                    const day = parseInt(parts[0], 10);
+                                    const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
+                                    const year = parseInt(parts[2], 10);
+                                    cellDate = new Date(year, month, day);
+                                } else {
+                                    cellDate = new Date(cellValue);
+                                }
                             } else {
                                 cellDate = new Date(cellValue);
                             }
                         } else {
-                            cellDate = new Date(cellValue);
+                            return false;
                         }
-                    } else {
+                        
+                        if (isNaN(cellDate.getTime())) return false;
+                        
+                        // Convert the filter dates from YYYY-MM-DD to Date objects
+                        const fromDate = dateFrom ? new Date(dateFrom) : null;
+                        const toDate = dateTo ? new Date(dateTo) : null;
+                        
+                        // Reset time components for accurate date comparison
+                        if (fromDate) fromDate.setHours(0, 0, 0, 0);
+                        if (toDate) toDate.setHours(23, 59, 59, 999);
+                        cellDate.setHours(0, 0, 0, 0);
+                        
+                        // Compare dates
+                        if (fromDate && toDate) {
+                            return cellDate >= fromDate && cellDate <= toDate;
+                        } else if (fromDate) {
+                            return cellDate >= fromDate;
+                        } else if (toDate) {
+                            return cellDate <= toDate;
+                        }
                         return false;
-                    }
-                    
-                    if (isNaN(cellDate.getTime())) return false;
-                    
-                    // Convert the filter dates from YYYY-MM-DD to Date objects
-                    const fromDate = dateFrom ? new Date(dateFrom) : null;
-                    const toDate = dateTo ? new Date(dateTo) : null;
-                    
-                    // Reset time components for accurate date comparison
-                    if (fromDate) fromDate.setHours(0, 0, 0, 0);
-                    if (toDate) toDate.setHours(23, 59, 59, 999);
-                    cellDate.setHours(0, 0, 0, 0);
-                    
-                    // Compare dates
-                    if (fromDate && toDate) {
-                        return cellDate >= fromDate && cellDate <= toDate;
-                    } else if (fromDate) {
-                        return cellDate >= fromDate;
-                    } else if (toDate) {
-                        return cellDate <= toDate;
-                    }
-                    return false;
-                });
-            } else {
-                const searchTerm = document.getElementById('nameSearchInput').value;
-                filteredData = originalData.filter(row => 
-                    row[column] && row[column].toString() === searchTerm
-                );
-                // Hide date range indicator when not using date filter
-                document.getElementById('dateRangeActive').classList.add('hidden');
-            }
-            
-            currentSortColumn = null;
-            sortDirection = 'asc';
-            showingAllRows = false;
-            updateMatchingRowsTable();
-        });
+                    });
+                } else {
+                    const searchTerm = document.getElementById('nameSearchInput').value;
+                    filteredData = originalData.filter(row => 
+                        row[column] && row[column].toString() === searchTerm
+                    );
+                    // Hide date range indicator when not using date filter
+                    document.getElementById('dateRangeActive').classList.add('hidden');
+                }
+                
+                currentSortColumn = null;
+                sortDirection = 'asc';
+                showingAllRows = false;
+                updateMatchingRowsTable();
+            });
 
         // Toggle showing all rows
         document.getElementById('showAllRows').addEventListener('click', () => {

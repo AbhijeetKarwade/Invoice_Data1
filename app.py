@@ -2,171 +2,133 @@ from flask import Flask, render_template, send_from_directory, request, jsonify
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
-import traceback
-from datetime import datetime
 
 app = Flask(__name__, static_folder='static', template_folder='static')
 
-# Configuration
+# Configuration for file uploads
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'processed'
 ALLOWED_EXTENSIONS = {'xlsx'}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
-# Create directories if they don't exist
+# Ensure upload and processed directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
-    """Check if the file has an allowed extension"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def validate_excel_file(file_stream):
-    """Quick validation that the file is actually an Excel file"""
-    try:
-        # Just read the first few bytes to check the file signature
-        header = file_stream.read(8)
-        file_stream.seek(0)  # Reset file pointer
-        
-        # Check for Excel file signatures
-        excel_signatures = [
-            b'\x50\x4B\x05\x06',  # Empty ZIP (end of central directory)
-            b'\x50\x4B\x03\x04',  # ZIP header
-            b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'  # OLE2 (older Excel)
-        ]
-        
-        return any(header.startswith(sig) for sig in excel_signatures)
-    except Exception:
-        return False
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def process_excel_file(filepath):
-    """Process Excel file with comprehensive error handling"""
+    """Process the Excel file using the logic from app2.py"""
     try:
-        # First try with openpyxl (for .xlsx)
-        try:
-            df_custom = pd.read_excel(
-                filepath,
-                sheet_name='Custom Report',
-                header=2,
-                engine='openpyxl'
-            )
-            df_items = pd.read_excel(
-                filepath,
-                sheet_name='Item Details',
-                header=2,
-                engine='openpyxl'
-            )
-        except Exception as e:
-            # Fall back to xlrd if openpyxl fails
-            try:
-                df_custom = pd.read_excel(
-                    filepath,
-                    sheet_name='Custom Report',
-                    header=2,
-                    engine='xlrd'
-                )
-                df_items = pd.read_excel(
-                    filepath,
-                    sheet_name='Item Details',
-                    header=2,
-                    engine='xlrd'
-                )
-            except Exception as fallback_error:
-                raise ValueError(f"Failed to read Excel file with both openpyxl and xlrd: {str(fallback_error)}")
+        # Read the two sheets, specifying header row (row 3, so header=2)
+        df_custom = pd.read_excel(filepath, sheet_name='Custom Report', header=2)
+        df_items = pd.read_excel(filepath, sheet_name='Item Details', header=2)
 
-        # Basic data validation
-        if df_custom.empty or df_items.empty:
-            raise ValueError("One or both sheets are empty")
-
-        # Clean column names
+        # Clean column names by stripping whitespace
         df_custom.columns = df_custom.columns.str.strip()
         df_items.columns = df_items.columns.str.strip()
 
-        # Check required columns
-        required_columns = {
-            'Custom Report': ['Date', 'Reference No'],
-            'Item Details': ['Date', 'Invoice No./Txn No.']
-        }
-        
-        for sheet, cols in required_columns.items():
-            df = df_custom if sheet == 'Custom Report' else df_items
-            missing = [col for col in cols if col not in df.columns]
-            if missing:
-                raise ValueError(f"Missing required columns in {sheet}: {', '.join(missing)}")
+        # Select key columns and rename for consistency
+        df_custom_key = df_custom[['Date', 'Reference No']].rename(columns={'Date': 'date', 'Reference No': 'Ref_No'})
+        df_items_key = df_items[['Date', 'Invoice No./Txn No.']].rename(columns={'Date': 'date', 'Invoice No./Txn No.': 'Ref_No'})
 
-        # Process data (simplified version)
-        processed_data = pd.concat([
-            df_custom[['Date', 'Reference No']].rename(columns={'Date': 'date', 'Reference No': 'Ref_No'}),
-            df_items[['Date', 'Invoice No./Txn No.']].rename(columns={'Date': 'date', 'Invoice No./Txn No.': 'Ref_No'})
-        ])
+        # Combine key columns without removing duplicates
+        parent_table = pd.concat([df_custom_key, df_items_key], ignore_index=True)
+        parent_table['date'] = pd.to_datetime(parent_table['date'], dayfirst=True, errors='coerce')
 
-        # Save processed file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        processed_filename = f"processed_{timestamp}_{secure_filename(os.path.basename(filepath))}"
+        # Prepare remaining columns from both sheets
+        custom_remaining = df_custom.drop(columns=['Date', 'Reference No'])
+        items_remaining = df_items.drop(columns=['Date', 'Invoice No./Txn No.'])
+
+        # Add prefixes to distinguish columns
+        custom_remaining.columns = [f'Custom_{col}' for col in custom_remaining.columns]
+        items_remaining.columns = [f'Items_{col}' for col in items_remaining.columns]
+
+        # Add Ref_No and date back for merging
+        custom_remaining['Ref_No'] = df_custom['Reference No']
+        custom_remaining['date'] = df_custom['Date']
+        items_remaining['Ref_No'] = df_items['Invoice No./Txn No.']
+        items_remaining['date'] = df_items['Date']
+
+        # Convert dates to datetime for consistent merging
+        custom_remaining['date'] = pd.to_datetime(custom_remaining['date'], dayfirst=True, errors='coerce')
+        items_remaining['date'] = pd.to_datetime(items_remaining['date'], dayfirst=True, errors='coerce')
+
+        # Merge with parent_table using Ref_No and date to preserve duplicates
+        parent_table = parent_table.merge(custom_remaining, on=['Ref_No', 'date'], how='outer')
+        parent_table = parent_table.merge(items_remaining, on=['Ref_No', 'date'], how='outer')
+
+        # Handle missing values
+        string_columns = [col for col in parent_table.columns if parent_table[col].dtype == 'object']
+        numeric_columns = [col for col in parent_table.columns if parent_table[col].dtype in ['float64', 'int64']]
+        parent_table[string_columns] = parent_table[string_columns].fillna('')
+        parent_table[numeric_columns] = parent_table[numeric_columns].fillna(0)
+
+        # Sort by date and Ref_No
+        parent_table = parent_table.sort_values(by=['date', 'Ref_No'])
+
+        # Format date to DD/MM/YYYY
+        parent_table['date'] = parent_table['date'].dt.strftime('%d/%m/%Y')
+
+        # Remove duplicates based on all columns
+        parent_table = parent_table.drop_duplicates(keep='first')
+
+        # Generate a unique filename for the processed file
+        processed_filename = 'processed_' + secure_filename(os.path.basename(filepath))
         processed_path = os.path.join(app.config['PROCESSED_FOLDER'], processed_filename)
-        
-        processed_data.to_excel(processed_path, index=False, startrow=2)
+
+        # Save to a new Excel file with column names starting from the 3rd row
+        parent_table.to_excel(processed_path, index=False, startrow=2)
         
         return processed_path, None
-
     except Exception as e:
-        error_msg = f"Error processing file: {str(e)}\n{traceback.format_exc()}"
-        app.logger.error(error_msg)
-        return None, f"Processing error: {str(e)}"
+        return None, str(e)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/print')
+def print_view():
+    return render_template('print.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    try:
-        # Check if file exists in request
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file part in request'}), 400
-        
-        file = request.files['file']
-        
-        # Check if file was selected
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        # Check file extension
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
-        
-        # Validate it's actually an Excel file
-        if not validate_excel_file(file.stream):
-            return jsonify({'error': 'Invalid Excel file format'}), 400
-        
-        # Save the file temporarily
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    
+    if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
-        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"temp_{filename}")
-        file.save(temp_path)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
         
-        # Process the file
-        processed_path, error = process_excel_file(temp_path)
-        
-        # Clean up temp file
-        try:
-            os.remove(temp_path)
-        except:
-            pass
+        # Process the Excel file
+        processed_path, error = process_excel_file(filepath)
         
         if error:
             return jsonify({'error': error}), 500
         
         return jsonify({
-            'message': 'File processed successfully',
+            'message': 'File successfully processed',
             'processed_file': os.path.basename(processed_path)
         })
+    
+    return jsonify({'error': 'Invalid file type'}), 400
 
-    except Exception as e:
-        app.logger.error(f"Unexpected error in upload: {str(e)}\n{traceback.format_exc()}")
-        return jsonify({'error': 'Internal server error'}), 500
+@app.route('/processed/<filename>')
+def processed_file(filename):
+    return send_from_directory(app.config['PROCESSED_FOLDER'], filename)
 
-# ... (keep your other routes the same)
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory(app.static_folder, filename)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(debug=True)
