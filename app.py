@@ -6,8 +6,11 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__, static_folder='static', template_folder='static')
 
 # Configuration for file uploads
-UPLOAD_FOLDER = 'uploads'
-PROCESSED_FOLDER = 'processed'
+# UPLOAD_FOLDER = 'uploads'
+# PROCESSED_FOLDER = 'processed'
+UPLOAD_FOLDER = '/opt/render/project/src/uploads'
+PROCESSED_FOLDER = '/opt/render/project/src/processed'
+
 ALLOWED_EXTENSIONS = {'xlsx'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
