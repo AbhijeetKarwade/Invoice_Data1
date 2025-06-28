@@ -550,89 +550,88 @@
             }
         }
 
-        // Search by Name or Date with proper DD/MM/YYYY handling
-                    // Search by Name or Date with proper DD/MM/YYYY handling
-            document.getElementById('searchByName').addEventListener('click', () => {
-                const column = document.getElementById('nameColumn').value;
-                const isDateColumn = column.toLowerCase().includes('date');
+        // Search by Name or Date - Fixed version
+        document.getElementById('searchByName').addEventListener('click', () => {
+            const column = document.getElementById('nameColumn').value;
+            const isDateColumn = column.toLowerCase().includes('date');
+            
+            if (isDateColumn) {
+                const dateFrom = document.getElementById('dateFrom').value;
+                const dateTo = document.getElementById('dateTo').value;
                 
-                if (isDateColumn) {
-                    const dateFrom = document.getElementById('dateFrom').value;
-                    const dateTo = document.getElementById('dateTo').value;
+                if (!dateFrom && !dateTo) {
+                    alert('Please select at least one date for the range');
+                    return;
+                }
+                
+                // Show active date range
+                const dateRangeActive = document.getElementById('dateRangeActive');
+                dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
+                dateRangeActive.classList.remove('hidden');
+                
+                filteredData = originalData.filter(row => {
+                    const cellValue = row[column];
+                    if (!cellValue) return false;
                     
-                    if (!dateFrom && !dateTo) {
-                        alert('Please select at least one date for the range');
-                        return;
-                    }
-                    
-                    // Show active date range
-                    const dateRangeActive = document.getElementById('dateRangeActive');
-                    dateRangeActive.textContent = `Active range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`;
-                    dateRangeActive.classList.remove('hidden');
-                    
-                    filteredData = originalData.filter(row => {
-                        const cellValue = row[column];
-                        if (!cellValue) return false;
-                        
-                        // Parse the cell value as a date in DD/MM/YYYY format
-                        let cellDate;
-                        if (cellValue instanceof Date) {
-                            cellDate = new Date(cellValue);
-                        } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
-                            // Handle string dates in DD/MM/YYYY format
-                            if (typeof cellValue === 'string' && cellValue.includes('/')) {
-                                const parts = cellValue.split('/');
-                                if (parts.length === 3) {
-                                    // Force DD/MM/YYYY interpretation
-                                    const day = parseInt(parts[0], 10);
-                                    const month = parseInt(parts[1], 10) - 1; // months are 0-indexed
-                                    const year = parseInt(parts[2], 10);
-                                    cellDate = new Date(year, month, day);
+                    // Parse the cell value as a date (ignore timezone)
+                    let cellDate;
+                    if (cellValue instanceof Date) {
+                        cellDate = new Date(cellValue);
+                    } else if (typeof cellValue === 'string' || typeof cellValue === 'number') {
+                        // For string dates, parse as local date (not UTC)
+                        if (typeof cellValue === 'string' && cellValue.includes('/')) {
+                            // Handle DD/MM/YYYY or MM/DD/YYYY format
+                            const parts = cellValue.split('/');
+                            if (parts.length === 3) {
+                                // Try both formats (DD/MM/YYYY and MM/DD/YYYY)
+                                const dayFirst = !isNaN(parts[0]) && parseInt(parts[0]) > 12;
+                                if (dayFirst) {
+                                    cellDate = new Date(parts[2], parts[1] - 1, parts[0]);
                                 } else {
-                                    cellDate = new Date(cellValue);
+                                    cellDate = new Date(parts[2], parts[0] - 1, parts[1]);
                                 }
                             } else {
                                 cellDate = new Date(cellValue);
                             }
                         } else {
-                            return false;
+                            cellDate = new Date(cellValue);
                         }
-                        
-                        if (isNaN(cellDate.getTime())) return false;
-                        
-                        // Convert the filter dates from YYYY-MM-DD to Date objects
-                        const fromDate = dateFrom ? new Date(dateFrom) : null;
-                        const toDate = dateTo ? new Date(dateTo) : null;
-                        
-                        // Reset time components for accurate date comparison
-                        if (fromDate) fromDate.setHours(0, 0, 0, 0);
-                        if (toDate) toDate.setHours(23, 59, 59, 999);
-                        cellDate.setHours(0, 0, 0, 0);
-                        
-                        // Compare dates
-                        if (fromDate && toDate) {
-                            return cellDate >= fromDate && cellDate <= toDate;
-                        } else if (fromDate) {
-                            return cellDate >= fromDate;
-                        } else if (toDate) {
-                            return cellDate <= toDate;
-                        }
+                    } else {
                         return false;
-                    });
-                } else {
-                    const searchTerm = document.getElementById('nameSearchInput').value;
-                    filteredData = originalData.filter(row => 
-                        row[column] && row[column].toString() === searchTerm
-                    );
-                    // Hide date range indicator when not using date filter
-                    document.getElementById('dateRangeActive').classList.add('hidden');
-                }
-                
-                currentSortColumn = null;
-                sortDirection = 'asc';
-                showingAllRows = false;
-                updateMatchingRowsTable();
-            });
+                    }
+                    
+                    if (isNaN(cellDate.getTime())) return false;
+                    
+                    // Format as YYYY-MM-DD for comparison
+                    const year = cellDate.getFullYear();
+                    const month = String(cellDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(cellDate.getDate()).padStart(2, '0');
+                    const cellDateStr = `${year}-${month}-${day}`;
+                    
+                    // Compare dates directly as strings (YYYY-MM-DD format)
+                    if (dateFrom && dateTo) {
+                        return cellDateStr >= dateFrom && cellDateStr <= dateTo;
+                    } else if (dateFrom) {
+                        return cellDateStr >= dateFrom;
+                    } else if (dateTo) {
+                        return cellDateStr <= dateTo;
+                    }
+                    return false;
+                });
+            } else {
+                const searchTerm = document.getElementById('nameSearchInput').value;
+                filteredData = originalData.filter(row => 
+                    row[column] && row[column].toString() === searchTerm
+                );
+                // Hide date range indicator when not using date filter
+                document.getElementById('dateRangeActive').classList.add('hidden');
+            }
+            
+            currentSortColumn = null;
+            sortDirection = 'asc';
+            showingAllRows = false;
+            updateMatchingRowsTable();
+        });
 
         // Toggle showing all rows
         document.getElementById('showAllRows').addEventListener('click', () => {
