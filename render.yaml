@@ -1,4 +1,8 @@
-buildCommand: |
-  chmod +x build.sh
-  ./build.sh
-  pip install -r requirements.txt
+services:
+  - name: invoice-extractor
+    runtime: python
+    pythonVersion: "3.9"
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: gunicorn app:app
