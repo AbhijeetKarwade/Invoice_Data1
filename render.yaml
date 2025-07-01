@@ -1,8 +1,10 @@
 services:
-  - name: invoice-extractor
-    runtime: python
-    pythonVersion: "3.9"
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
+  - type: web
+    name: invoice-extractor
+    env: python
+    buildCommand: ""
     startCommand: gunicorn app:app
+    runtime: python
+    region: oregon
+    plan: free
+    autoDeploy: true
