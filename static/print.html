@@ -3,54 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Filtered Invoice Data</title>
+    <title>Invoice Report</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        button { padding: 10px; margin: 5px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background-color: #2563eb; }
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px;
+            font-size: 12pt;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px;
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 8px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #f2f2f2; 
+        }
+        button { 
+            padding: 10px; 
+            margin: 5px; 
+            background-color: #3b82f6; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+        }
+        button:hover { 
+            background-color: #2563eb; 
+        }
+        .header-info { 
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+        .header-line { 
+            margin-bottom: 5px;
+        }
+        .name-address {
+            display: inline-block;
+            min-width: 300px;
+        }
+        .date-range {
+            display: inline-block;
+            min-width: 300px;
+        }
+        /* Summary row styles */
+        .total-row td {
+            font-weight: bold;
+            background-color: #f0f0f0;
+        }
+        .subtotal-row td {
+            font-weight: bold;
+            background-color: #e0e0e0;
+        }
+        .final-total-row td {
+            font-weight: bold;
+            background-color: #d0d0d0;
+        }
+        .description-row td {
+            font-style: italic;
+            color: #666;
+            border-bottom: none;
+        }
         @media print {
-            button { display: none; }
-            h1 { font-size: 16pt; }
-            h2 { font-size: 14pt; }
-            body { margin: 0; padding: 20px; }
+            button { 
+                display: none; 
+            }
+            body { 
+                margin: 0; 
+                padding: 20px; 
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Filtered Invoice Data</h1>
-    <h2 id="sheetTitle"></h2>
+    <div id="headerInfo" class="header-info"></div>
     <table id="dataTable"></table>
     <button onclick="window.print()">Print</button>
     <button onclick="window.location.href='/'">Back to Home</button>
     <script>
+        function extractPartyInfo(partyString) {
+            if (!partyString) return { name: '', mobile: '' };
+            
+            // Extract mobile number (last 10 digits)
+            const mobileMatch = partyString.match(/\d{10}/);
+            const mobile = mobileMatch ? mobileMatch[0] : '';
+            
+            // Extract name by removing the mobile part and parentheses
+            let name = partyString.replace(/\(.*\d{10}.*\)/, '').trim();
+            if (!name) {
+                // If name is empty after removal, use the full string without mobile
+                name = partyString.replace(/\d{10}/, '').replace(/[()]/g, '').trim();
+            }
+            
+            return { name, mobile };
+        }
+
         window.addEventListener('load', () => {
             const filteredData = JSON.parse(sessionStorage.getItem('filteredData') || '[]');
             const columnsToShow = JSON.parse(sessionStorage.getItem('columnsToShow') || '[]');
-            const sheetName = sessionStorage.getItem('sheetName') || '';
+            const dateRange = JSON.parse(sessionStorage.getItem('dateRange') || '{}');
+            const partyInfo = JSON.parse(sessionStorage.getItem('partyInfo') || '{}');
             const table = document.getElementById('dataTable');
+            const headerInfo = document.getElementById('headerInfo');
 
-            // Display sheet name
-            document.getElementById('sheetTitle').textContent = sheetName ? `Sheet: ${sheetName}` : '';
+            // Display header information with proper spacing
+            let headerHTML = '';
+            
+            if (partyInfo.name || partyInfo.mobile) {
+                headerHTML += `<div class="header-line">
+                    <strong>Name & Add :</strong> 
+                    <span class="name-address">${partyInfo.name || ''}</span>
+                    <strong>Mob :</strong> ${partyInfo.mobile || ''}
+                </div>`;
+            }
+            
+            if (dateRange.from || dateRange.to) {
+                headerHTML += `<div class="header-line">
+                    <strong>Date Range :</strong> 
+                    <span class="date-range">${dateRange.from || ''} ${dateRange.to ? 'to ' + dateRange.to : ''}</span>
+                </div>`;
+            }
 
-            // Clear existing content
-            table.innerHTML = '';
+            headerInfo.innerHTML = headerHTML;
 
+            // Create table
             if (filteredData.length === 0 || columnsToShow.length === 0) {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
                 td.colSpan = columnsToShow.length || 1;
-                td.textContent = 'No filtered data available. Please apply filters in the main page.';
+                td.textContent = 'No filtered data available.';
                 tr.appendChild(td);
                 table.appendChild(tr);
                 return;
             }
 
-            // Create header
+            // Create table header
             const thead = document.createElement('thead');
             const tr = document.createElement('tr');
+            
+            // Add sequential number column
+            const thNum = document.createElement('th');
+            thNum.textContent = '#';
+            tr.appendChild(thNum);
+            
             columnsToShow.forEach(column => {
                 const th = document.createElement('th');
                 th.textContent = column;
@@ -59,23 +158,142 @@
             thead.appendChild(tr);
             table.appendChild(thead);
 
-            // Create body
+            // Create table body
             const tbody = document.createElement('tbody');
-            filteredData.forEach(row => {
+            
+            // Calculate totals
+            let totalQuantity = 0;
+            let totalAmount = 0;
+            
+            filteredData.forEach((row, index) => {
                 const tr = document.createElement('tr');
+                
+                // Add sequential number
+                const tdNum = document.createElement('td');
+                tdNum.textContent = index + 1;
+                tr.appendChild(tdNum);
+                
                 columnsToShow.forEach(column => {
                     const td = document.createElement('td');
-                    td.textContent = row[column] || '';
+                    // Special handling for Items_Party Name to remove mobile if needed
+                    if (column === 'Items_Party Name' && row[column]) {
+                        const info = extractPartyInfo(row[column]);
+                        td.textContent = `${info.name} (${info.mobile})`;
+                    } else {
+                        td.textContent = row[column] || '';
+                    }
+                    
+                    // Sum quantities and amounts
+                    if (column === 'Items_Quantity') {
+                        totalQuantity += parseFloat(row[column]) || 0;
+                    }
+                    if (column === 'Items_Amount') {
+                        totalAmount += parseFloat(row[column]) || 0;
+                    }
+                    
                     tr.appendChild(td);
                 });
                 tbody.appendChild(tr);
             });
+
+            // Add summary rows if we have quantity and amount columns
+            if (columnsToShow.includes('Items_Quantity') && columnsToShow.includes('Items_Amount')) {
+                // Total row
+                const totalRow = document.createElement('tr');
+                totalRow.className = 'total-row';
+                
+                const tdTotalLabel = document.createElement('td');
+                tdTotalLabel.colSpan = 1;
+                tdTotalLabel.textContent = 'Total';
+                totalRow.appendChild(tdTotalLabel);
+                
+                // Find positions of quantity and amount columns
+                const qtyIndex = columnsToShow.indexOf('Items_Quantity') + 1; // +1 for the # column
+                const amtIndex = columnsToShow.indexOf('Items_Amount') + 1;
+                
+                // Add empty cells until quantity column
+                for (let i = 1; i < qtyIndex; i++) {
+                    const td = document.createElement('td');
+                    td.textContent = '';
+                    totalRow.appendChild(td);
+                }
+                
+                // Add quantity total
+                const tdTotalQty = document.createElement('td');
+                tdTotalQty.textContent = totalQuantity.toFixed(2);
+                totalRow.appendChild(tdTotalQty);
+                
+                // Add empty cells between quantity and amount
+                for (let i = qtyIndex + 1; i < amtIndex; i++) {
+                    const td = document.createElement('td');
+                    td.textContent = '';
+                    totalRow.appendChild(td);
+                }
+                
+                // Add amount total
+                const tdTotalAmount = document.createElement('td');
+                tdTotalAmount.textContent = totalAmount.toFixed(2);
+                totalRow.appendChild(tdTotalAmount);
+                
+                tbody.appendChild(totalRow);
+                
+                // Sub Total row
+                const subTotalRow = document.createElement('tr');
+                subTotalRow.className = 'subtotal-row';
+                
+                const tdSubTotalLabel = document.createElement('td');
+                tdSubTotalLabel.colSpan = columnsToShow.length; // Span all columns
+                tdSubTotalLabel.textContent = 'Sub Total';
+                tdSubTotalLabel.style.textAlign = 'right';
+                subTotalRow.appendChild(tdSubTotalLabel);
+                
+                const tdSubTotalValue = document.createElement('td');
+                tdSubTotalValue.textContent = totalAmount.toFixed(2);
+                subTotalRow.appendChild(tdSubTotalValue);
+                
+                tbody.appendChild(subTotalRow);
+                
+                // Description row
+                const descRow = document.createElement('tr');
+                descRow.className = 'description-row';
+                
+                const tdDesc = document.createElement('td');
+                tdDesc.colSpan = columnsToShow.length + 1; // Span all columns including #
+                let customDescriptionText = '';
+                const firstWithDescription = filteredData.find(row => row['Custom_Description']);
+                if (firstWithDescription) {
+                    customDescriptionText = firstWithDescription['Custom_Description'];
+                }
+                tdDesc.textContent = `Custom_Description: ${customDescriptionText}`;
+
+                descRow.appendChild(tdDesc);
+                
+                tbody.appendChild(descRow);
+                
+                // Final Total row
+                const finalTotalRow = document.createElement('tr');
+                finalTotalRow.className = 'final-total-row';
+                
+                const tdFinalTotalLabel = document.createElement('td');
+                tdFinalTotalLabel.colSpan = columnsToShow.length; // Span all columns
+                tdFinalTotalLabel.textContent = 'Total';
+                tdFinalTotalLabel.style.textAlign = 'right';
+                finalTotalRow.appendChild(tdFinalTotalLabel);
+                
+                const tdFinalTotalValue = document.createElement('td');
+                tdFinalTotalValue.textContent = totalAmount.toFixed(2);
+                finalTotalRow.appendChild(tdFinalTotalValue);
+                
+                tbody.appendChild(finalTotalRow);
+            }
+            
             table.appendChild(tbody);
 
-            // Clear sessionStorage after use
+            // Clear sessionStorage
             sessionStorage.removeItem('filteredData');
             sessionStorage.removeItem('columnsToShow');
-            sessionStorage.removeItem('sheetName');
+            sessionStorage.removeItem('dateRange');
+            sessionStorage.removeItem('partyInfo');
         });
     </script>
 </body>

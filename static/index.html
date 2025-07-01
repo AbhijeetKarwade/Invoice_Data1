@@ -161,6 +161,111 @@
             margin-top: 0.25rem;
             display: none;
         }
+
+        /* Summary row styles */
+        .total-row td {
+            font-weight: bold;
+            background-color: #f0f0f0;
+        }
+        .subtotal-row td {
+            font-weight: bold;
+            background-color: #e0e0e0;
+        }
+        .final-total-row td {
+            font-weight: bold;
+            background-color: #d0d0d0;
+        }
+        .description-row td {
+            font-style: italic;
+            color: #666;
+            font-family: "Calibri", "Calibri Body", sans-serif;
+        }
+        
+        /* Selected row style */
+        .selected-row {
+            background-color: #e6f7ff !important;
+        }
+        
+        /* Checkbox styles */
+        .row-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        /* Select all checkbox */
+        .select-all-checkbox {
+            margin-right: 5px;
+        }
+
+        /* Toggle switch styles */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 28px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #3b82f6;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: #10b981;
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(32px);
+        }
+
+        .toggle-label {
+            font-size: 0.875rem;
+            color: #333;
+        }
     </style>
 </head>
 <body class="p-4 bg-gray-100">
@@ -222,11 +327,18 @@
         </div>
 
         <!-- Export Buttons -->
-        <div class="flex flex-wrap gap-2 mt-4">
+        <div class="flex flex-wrap gap-2 mt-4 items-center">
             <button id="downloadPDF" class="bg-green-500 text-white px-3 py-1 rounded hover:bg-purple-600 text-sm">
                 PDF
             </button>
-            <button id="viewPrint" class="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 text-sm">
+            <div class="toggle-container">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="printToggle">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span id="printToggleLabel" class="toggle-label">Print All</span>
+            </div>
+            <button id="executePrint" class="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 text-sm">
                 View & Print
             </button>
         </div>
@@ -248,84 +360,90 @@
         let selectedColumns = [];
         let currentSortColumn = null;
         let sortDirection = 'asc';
+        let selectedRows = new Set();
 
         // Load Excel File
-        
-            document.getElementById('loadFile').addEventListener('click', () => {
-                const file = document.getElementById('fileInput').files[0];
-                if (!file) {
-                    alert('Please select a file.');
-                    return;
+        document.getElementById('loadFile').addEventListener('click', () => {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) {
+                alert('Please select a file.');
+                return;
+            }
+
+            // Show loading state
+            const loadButtonText = document.getElementById('loadButtonText');
+            const loadSpinner = document.getElementById('loadSpinner');
+            const loadButton = document.getElementById('loadFile');
+            
+            loadButton.disabled = true;
+            loadButtonText.textContent = 'Processing...';
+            loadSpinner.classList.remove('hidden');
+
+            // Create FormData object to send the file
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Send the file to the server for processing
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || 'Network response was not ok');
+                    });
+                }
+                return response.json();
+            })
+            .then(responseData => {
+                if (responseData.error) {
+                    throw new Error(responseData.error);
                 }
 
-                // Show loading state
-                const loadButtonText = document.getElementById('loadButtonText');
-                const loadSpinner = document.getElementById('loadSpinner');
-                const loadButton = document.getElementById('loadFile');
+                // Process the returned data directly
+                data = responseData.data || [];
+                headers = responseData.headers || (data.length > 0 ? Object.keys(data[0]) : []);
                 
-                loadButton.disabled = true;
-                loadButtonText.textContent = 'Processing...';
-                loadSpinner.classList.remove('hidden');
-
-                // Create FormData object to send the file
-                const formData = new FormData();
-                formData.append('file', file);
-
-                // Send the file to the server for processing
-                fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(err => {
-                            throw new Error(err.error || 'Network response was not ok');
-                        });
-                    }
-                    return response.json();
-                })
-                .then(responseData => {
-                    if (responseData.error) {
-                        throw new Error(responseData.error);
-                    }
-
-                    // Process the returned data directly
-                    data = responseData.data || [];
-                    headers = responseData.headers || (data.length > 0 ? Object.keys(data[0]) : []);
-                    
-                    if (data.length === 0) {
-                        throw new Error('No data found in the processed file');
-                    }
-                    
-                    // Store the data
-                    originalData = [...data];
-                    filteredData = [...data];
-                    selectedColumns = [...headers];
-                    showingAllRows = false;
-                    currentSortColumn = null;
-                    sortDirection = 'asc';
-                    
-                    updateMatchingRowsTable();
-                    populateDropdowns();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred: ' + error.message);
-                    
-                    // Clear any existing data
-                    data = [];
-                    headers = [];
-                    originalData = [];
-                    filteredData = [];
-                    updateMatchingRowsTable();
-                })
-                .finally(() => {
-                    // Reset button state
-                    loadButton.disabled = false;
-                    loadButtonText.textContent = 'Upload';
-                    loadSpinner.classList.add('hidden');
-                });
+                if (data.length === 0) {
+                    throw new Error('No data found in the processed file');
+                }
+                
+                // Store the data
+                originalData = [...data];
+                filteredData = [...data];
+                selectedColumns = [...headers];
+                showingAllRows = false;
+                currentSortColumn = null;
+                sortDirection = 'asc';
+                selectedRows = new Set();
+                
+                updateMatchingRowsTable();
+                populateDropdowns();
+                document.getElementById('printToggle').checked = false;
+                document.getElementById('printToggleLabel').textContent = 'Print All';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred: ' + error.message);
+                
+                // Clear any existing data
+                data = [];
+                headers = [];
+                originalData = [];
+                filteredData = [];
+                selectedRows = new Set();
+                updateMatchingRowsTable();
+                document.getElementById('printToggle').checked = false;
+                document.getElementById('printToggleLabel').textContent = 'Print All';
+            })
+            .finally(() => {
+                // Reset button state
+                loadButton.disabled = false;
+                loadButtonText.textContent = 'Upload';
+                loadSpinner.classList.add('hidden');
             });
+        });
 
         // Populate Dropdowns
         function populateDropdowns() {
@@ -458,7 +576,42 @@
             updateMatchingRowsTable();
         }
 
-        // Update Matching Rows Table with sorting
+        // Toggle row selection
+        function toggleRowSelection(index, checkbox) {
+            const row = document.querySelector(`#matchingRowsTable tr[data-index="${index}"]`);
+            if (checkbox.checked) {
+                selectedRows.add(index);
+                row.classList.add('selected-row');
+            } else {
+                selectedRows.delete(index);
+                row.classList.remove('selected-row');
+            }
+        }
+
+        // Select all rows
+        function selectAllRows(selectAllCheckbox) {
+            const checkboxes = document.querySelectorAll('#matchingRowsTable tbody input.row-checkbox');
+            
+            if (selectAllCheckbox.checked) {
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = true;
+                    const index = parseInt(checkbox.dataset.index);
+                    selectedRows.add(index);
+                    const row = document.querySelector(`#matchingRowsTable tr[data-index="${index}"]`);
+                    row.classList.add('selected-row');
+                });
+            } else {
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                    const index = parseInt(checkbox.dataset.index);
+                    selectedRows.delete(index);
+                    const row = document.querySelector(`#matchingRowsTable tr[data-index="${index}"]`);
+                    row.classList.remove('selected-row');
+                });
+            }
+        }
+
+        // Update Matching Rows Table with sorting and summary rows
         function updateMatchingRowsTable() {
             const table = document.getElementById('matchingRowsTable');
             const showAllBtn = document.getElementById('showAllRows');
@@ -471,6 +624,21 @@
 
             const thead = document.createElement('thead');
             const tr = document.createElement('tr');
+            
+            // Add select all checkbox column
+            const thSelect = document.createElement('th');
+            const selectAllCheckbox = document.createElement('input');
+            selectAllCheckbox.type = 'checkbox';
+            selectAllCheckbox.className = 'row-checkbox select-all-checkbox';
+            selectAllCheckbox.addEventListener('change', () => selectAllRows(selectAllCheckbox));
+            thSelect.appendChild(selectAllCheckbox);
+            tr.appendChild(thSelect);
+            
+            // Add sequential number column
+            const thNum = document.createElement('th');
+            thNum.textContent = '#';
+            thNum.className = 'sortable-header';
+            tr.appendChild(thNum);
             
             const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
             
@@ -495,15 +663,134 @@
             const tbody = document.createElement('tbody');
             const rowsToShow = showingAllRows ? filteredData : filteredData.slice(0, 5);
             
-            rowsToShow.forEach(row => {
+            // Calculate totals
+            let totalQuantity = 0;
+            let totalAmount = 0;
+            
+            rowsToShow.forEach((row, index) => {
                 const tr = document.createElement('tr');
+                tr.dataset.index = index;
+                
+                // Add checkbox for row selection
+                const tdSelect = document.createElement('td');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'row-checkbox';
+                checkbox.dataset.index = index;
+                checkbox.addEventListener('change', (e) => toggleRowSelection(index, e.target));
+                if (selectedRows.has(index)) {
+                    checkbox.checked = true;
+                    tr.classList.add('selected-row');
+                }
+                tdSelect.appendChild(checkbox);
+                tr.appendChild(tdSelect);
+                
+                // Add sequential number
+                const tdNum = document.createElement('td');
+                tdNum.textContent = index + 1;
+                tr.appendChild(tdNum);
+                
                 displayColumns.forEach(header => {
                     const td = document.createElement('td');
                     td.textContent = row[header] || '';
                     tr.appendChild(td);
+                    
+                    // Sum quantities and amounts
+                    if (header === 'Items_Quantity') {
+                        totalQuantity += parseFloat(row[header]) || 0;
+                    }
+                    if (header === 'Items_Amount') {
+                        totalAmount += parseFloat(row[header]) || 0;
+                    }
                 });
                 tbody.appendChild(tr);
             });
+
+            // Add summary rows if we have quantity and amount columns
+            if (displayColumns.includes('Items_Quantity') && displayColumns.includes('Items_Amount')) {
+                // Find column indices for quantity and amount
+                const qtyIndex = displayColumns.indexOf('Items_Quantity');
+                const amtIndex = displayColumns.indexOf('Items_Amount');
+                
+                // Total row
+                const totalRow = document.createElement('tr');
+                totalRow.className = 'total-row';
+                
+                // Add empty checkbox column
+                const tdSelect = document.createElement('td');
+                totalRow.appendChild(tdSelect);
+                
+                // Add # column
+                const tdNum = document.createElement('td');
+                tdNum.textContent = '';
+                totalRow.appendChild(tdNum);
+                
+                // Add cells for each column
+                displayColumns.forEach((header, index) => {
+                    const td = document.createElement('td');
+                    
+                    if (header === 'Items_Quantity') {
+                        td.textContent = totalQuantity.toFixed(2);
+                    } else if (header === 'Items_Amount') {
+                        td.textContent = totalAmount.toFixed(2);
+                    } else {
+                        td.textContent = '';
+                    }
+                    
+                    totalRow.appendChild(td);
+                });
+                
+                tbody.appendChild(totalRow);
+                
+                // Sub Total row
+                const subTotalRow = document.createElement('tr');
+                subTotalRow.className = 'subtotal-row';
+                
+                const tdSubTotalLabel = document.createElement('td');
+                tdSubTotalLabel.colSpan = displayColumns.length + 2; // Span all columns including # and checkbox
+                tdSubTotalLabel.textContent = 'Sub Total';
+                tdSubTotalLabel.style.textAlign = 'right';
+                subTotalRow.appendChild(tdSubTotalLabel);
+                
+                const tdSubTotalValue = document.createElement('td');
+                tdSubTotalValue.textContent = totalAmount.toFixed(2);
+                subTotalRow.appendChild(tdSubTotalValue);
+                
+                tbody.appendChild(subTotalRow);
+                
+                // Description row
+                const descRow = document.createElement('tr');
+                descRow.className = 'description-row';
+                
+                const tdDesc = document.createElement('td');
+                tdDesc.colSpan = displayColumns.length + 2;
+                let customDescriptionText = '';
+                const firstWithDescription = filteredData.find(row => row['Custom_Description']);
+                if (firstWithDescription) {
+                    customDescriptionText = firstWithDescription['Custom_Description'];
+                }
+                tdDesc.textContent = `Custom_Description: ${customDescriptionText}`;
+                descRow.appendChild(tdDesc);
+                
+                tbody.appendChild(descRow);
+                
+                // Final Total row
+                const finalTotalRow = document.createElement('tr');
+                finalTotalRow.className = 'final-total-row';
+                
+                const tdFinalTotalLabel = document.createElement('td');
+                tdFinalTotalLabel.colSpan = displayColumns.length + 2; // Span all columns including # and checkbox
+                tdFinalTotalLabel.textContent = 'Total';
+                tdFinalTotalLabel.style.textAlign = 'right';
+                finalTotalRow.appendChild(tdFinalTotalLabel);
+                
+                const tdFinalTotalValue = document.createElement('td');
+                tdFinalTotalValue.textContent = totalAmount.toFixed(2);
+                finalTotalRow.appendChild(tdFinalTotalValue);
+                
+                tbody.appendChild(finalTotalRow);
+            }
+            
             table.appendChild(tbody);
 
             if (filteredData.length > 5 && !showingAllRows) {
@@ -594,6 +881,9 @@
             currentSortColumn = null;
             sortDirection = 'asc';
             showingAllRows = false;
+            selectedRows = new Set();
+            document.getElementById('printToggle').checked = false;
+            document.getElementById('printToggleLabel').textContent = 'Print All';
             updateMatchingRowsTable();
         });
 
@@ -648,18 +938,92 @@
             doc.save('invoice_report.pdf');
         });
 
-        // View & Print
-        document.getElementById('viewPrint').addEventListener('click', () => {
-            if (filteredData.length === 0) {
-                alert('No filtered data available. Please apply filters first.');
-                return;
-            }
-            const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
-            const sheetName = "Processed Data";
+        // Print Toggle Switch
+        document.getElementById('printToggle').addEventListener('change', function() {
+            document.getElementById('printToggleLabel').textContent = this.checked ? 'Print Selected' : 'Print All';
+        });
+
+        // Execute Print
+        document.getElementById('executePrint').addEventListener('click', () => {
+            const printToggle = document.getElementById('printToggle');
             
-            sessionStorage.setItem('filteredData', JSON.stringify(filteredData));
+            if (printToggle.checked) {
+                // Print Selected
+                if (selectedRows.size === 0) {
+                    alert('No rows selected. Please select rows to print.');
+                    return;
+                }
+                const selectedData = Array.from(selectedRows).map(index => filteredData[index]);
+                prepareAndOpenPrintView(selectedData);
+            } else {
+                // Print All
+                if (filteredData.length === 0) {
+                    alert('No filtered data available. Please apply filters first.');
+                    return;
+                }
+                prepareAndOpenPrintView(filteredData);
+            }
+        });
+
+        // Prepare data and open print view
+        function prepareAndOpenPrintView(dataToPrint) {
+            const displayColumns = selectedColumns.length > 0 ? selectedColumns : headers;
+            
+            // Find the first row with Items_Party Name
+            const partyRow = dataToPrint.find(row => row['Items_Party Name']);
+            let partyInfo = { name: '', mobile: '' };
+            
+            if (partyRow) {
+                const partyString = partyRow['Items_Party Name'];
+                // Extract name and mobile
+                const mobileMatch = partyString.match(/\d{10}/);
+                partyInfo.mobile = mobileMatch ? mobileMatch[0] : '';
+                
+                // Extract name by removing the mobile part and parentheses
+                partyInfo.name = partyString.replace(/\(.*\d{10}.*\)/, '').trim();
+                if (!partyInfo.name) {
+                    // If name is empty after removal, use the full string without mobile
+                    partyInfo.name = partyString.replace(/\d{10}/, '').replace(/[()]/g, '').trim();
+                }
+            }
+            
+            // Get date range from the date filter inputs
+            const dateRange = { from: '', to: '' };
+            const dateFromInput = document.getElementById('dateFrom');
+            const dateToInput = document.getElementById('dateTo');
+            
+            if (dateFromInput.value || dateToInput.value) {
+                if (dateFromInput.value) {
+                    const [y, m, d] = dateFromInput.value.split('-');
+                    dateRange.from = `${d}/${m}/${y}`;
+                }
+                if (dateToInput.value) {
+                    const [y, m, d] = dateToInput.value.split('-');
+                    dateRange.to = `${d}/${m}/${y}`;
+                }
+            } else {
+                // If no date filter is applied, show the min and max dates from the data
+                const dates = dataToPrint.map(row => {
+                    if (row.date) {
+                        const [d, m, y] = row.date.split('/');
+                        return new Date(`${y}-${m}-${d}`);
+                    }
+                    return null;
+                }).filter(date => date);
+                
+                if (dates.length > 0) {
+                    const minDate = new Date(Math.min(...dates));
+                    const maxDate = new Date(Math.max(...dates));
+                    
+                    dateRange.from = `${String(minDate.getDate()).padStart(2, '0')}/${String(minDate.getMonth() + 1).padStart(2, '0')}/${minDate.getFullYear()}`;
+                    dateRange.to = `${String(maxDate.getDate()).padStart(2, '0')}/${String(maxDate.getMonth() + 1).padStart(2, '0')}/${maxDate.getFullYear()}`;
+                }
+            }
+            
+            sessionStorage.setItem('filteredData', JSON.stringify(dataToPrint));
             sessionStorage.setItem('columnsToShow', JSON.stringify(displayColumns));
-            sessionStorage.setItem('sheetName', sheetName);
+            sessionStorage.setItem('dateRange', JSON.stringify(dateRange));
+            sessionStorage.setItem('partyInfo', JSON.stringify(partyInfo));
             
             setTimeout(() => {
                 const printWindow = window.open('/print', '_blank');
@@ -667,7 +1031,7 @@
                     alert('Popup blocked. Please allow popups for this site.');
                 }
             }, 100);
-        });
+        }
     </script>
 </body>
 </html>
