@@ -1,5 +1,7 @@
-flask==2.3.3
-pandas==2.2.3
+
+Flask==3.0.0
+pandas==2.2.0
 openpyxl==3.1.2
-werkzeug==3.0.4
-gunicorn==23.0.0
+xlrd==2.0.1
+gunicorn==21.2.0
+Werkzeug==3.0.1
