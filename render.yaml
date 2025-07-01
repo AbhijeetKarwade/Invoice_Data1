@@ -1,12 +1,4 @@
-services:
-  - type: web
-    name: invoice-extractor
-    env: python
-    buildCommand: |
-      apt-get update && apt-get install -y gcc python3-dev libpq-dev build-essential
-      pip install -r requirements.txt
-    startCommand: gunicorn app:app
-    runtime: python
-    region: oregon
-    plan: free
-    autoDeploy: true
+buildCommand: |
+  chmod +x build.sh
+  ./build.sh
+  pip install -r requirements.txt
